@@ -4,7 +4,7 @@ use super::*;
 
 use lazy_static::lazy_static;
 use spin::Mutex;
-use x86_64::instructions::port::Port;
+use x86_64::instructions::port::{Port, PortGeneric, ReadWriteAccess};
 
 pub static WRITE_COMMAND: u8 = 0x30;
 pub static READ_COMMAND: u8 = 0x20;
@@ -62,12 +62,12 @@ pub mod status {
         pub val: u8,
     }
     impl Status {
-        pub fn error(&self) -> bool { self.val & Bitflags::ERR as u8 > 0 }
-        pub fn drive_request(&self) -> bool { self.val & Bitflags::DRQ as u8 > 0 }
-        pub fn service_request(&self) -> bool { self.val & Bitflags::SRV as u8 > 0 }
-        pub fn drive_fault(&self) -> bool { self.val & Bitflags::DF as u8 > 0 }
-        pub fn ready(&self) -> bool { self.val & Bitflags::RDY as u8 > 0 }
-        pub fn busy(&self) -> bool { self.val & Bitflags::BSY as u8 > 0 }
+        pub fn error(&self) -> bool { self.val & (1 << Bitflags::ERR as u8) > 0 }
+        pub fn drive_request(&self) -> bool { self.val & (1 << Bitflags::DRQ as u8) > 0 }
+        pub fn service_request(&self) -> bool { self.val & (1 << Bitflags::SRV as u8) > 0 }
+        pub fn drive_fault(&self) -> bool { self.val & (1 << Bitflags::DF as u8) > 0 }
+        pub fn ready(&self) -> bool { self.val & (1 << Bitflags::RDY as u8) > 0 }
+        pub fn busy(&self) -> bool { self.val & (1 << Bitflags::BSY as u8) > 0 }
     }
 }
 
@@ -89,14 +89,14 @@ pub mod error {
         pub val: u8,
     }
     impl Error {
-        pub fn address_mark_not_found(&self) -> bool { self.val & Bitflags::AMNF as u8 > 0 }
-        pub fn track_zero_not_found(&self) -> bool { self.val & Bitflags::TKZNF as u8 > 0 }
-        pub fn aborted_command(&self) -> bool { self.val & Bitflags::ABRT as u8 > 0 }
-        pub fn media_change_request(&self) -> bool { self.val & Bitflags::MCR as u8 > 0 }
-        pub fn id_not_found(&self) -> bool { self.val & Bitflags::IDNF as u8 > 0 }
-        pub fn media_changed(&self) -> bool { self.val & Bitflags::MC as u8 > 0 }
-        pub fn uncorrectable_data(&self) -> bool { self.val & Bitflags::UNC as u8 > 0 }
-        pub fn bad_block(&self) -> bool { self.val & Bitflags::BBK as u8 > 0 }
+        pub fn address_mark_not_found(&self) -> bool { self.val & (1 << Bitflags::AMNF as u8) > 0 }
+        pub fn track_zero_not_found(&self) -> bool { self.val & (1 << Bitflags::TKZNF as u8) > 0 }
+        pub fn aborted_command(&self) -> bool { self.val & (1 << Bitflags::ABRT as u8) > 0 }
+        pub fn media_change_request(&self) -> bool { self.val & (1 << Bitflags::MCR as u8) > 0 }
+        pub fn id_not_found(&self) -> bool { self.val & (1 << Bitflags::IDNF as u8) > 0 }
+        pub fn media_changed(&self) -> bool { self.val & (1 << Bitflags::MC as u8) > 0 }
+        pub fn uncorrectable_data(&self) -> bool { self.val & (1 << Bitflags::UNC as u8) > 0 }
+        pub fn bad_block(&self) -> bool { self.val & (1 << Bitflags::BBK as u8) > 0 }
     }
 }
 
@@ -132,6 +132,13 @@ impl Driver {
         self.read_status();
         while !self.status.drive_request() {
             //println!("{}", self.status.val);
+            self.read_status();
+        }
+    }
+    pub fn wait_rdy(&mut self) {
+        self.read_status();
+        while !self.status.ready() {
+            println!("{}", self.status.val);
             self.read_status();
         }
     }
@@ -200,6 +207,69 @@ impl Driver {
     pub fn read_status(&mut self) {
         let mut p = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::StatusRegister as u16);
         self.status = status::Status { val: unsafe { p.read() } };
+    }
+    pub fn identify_device(&mut self) -> [u8; 512] {
+        self.wait_bsy();
+        self.wait_rdy();
+        let mut dh_reg: PortGeneric<u8, ReadWriteAccess> = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DriveAndHeadRegister as u16);
+        //let mut sec_count_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorCountRegister as u16);
+        //let mut lba_lo_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorNumberRegister as u16);
+        //let mut lba_mid_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderLowRegister as u16);
+        //let mut lba_high_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderHighRegister as u16);
+        let mut data_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DataRegister as u16);
+        let mut cmd_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortWrite::CommandRegister as u16);
+        let buf = [0_u8; 512];
+
+        unsafe {
+            cmd_reg.write(0xEC_u8); // should be ECh
+            let mut buf = [0_u8; 512];
+            self.wait_bsy();
+            self.wait_rdy();
+            for word in 0..512 {
+                buf[word] = data_reg.read();
+            }
+        }
+        buf
+    }
+    pub fn identify(&mut self, is_master_drive: bool) -> [u16; 256] {
+        println!("Identifying device");
+
+        let mut dh_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DriveAndHeadRegister as u16);
+        let mut sec_count_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorCountRegister as u16);
+        let mut lba_lo_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorNumberRegister as u16);
+        let mut lba_mid_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderLowRegister as u16);
+        let mut lba_high_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderHighRegister as u16);
+        let mut cmd_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortWrite::CommandRegister as u16);
+        let mut data_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DataRegister as u16);
+
+        let mut data = [0; 256];
+        unsafe {
+            println!("Writing drive selection and port zeros");
+            dh_reg.write(0xB0_u8);
+            sec_count_reg.write(0x0_u8);
+            lba_lo_reg.write(0x0_u8);
+            lba_mid_reg.write(0x0_u8);
+            lba_high_reg.write(0x0_u8);
+            
+            println!("Written those, writing command");
+            cmd_reg.write(0xEC_u8);
+            self.read_status();
+            if self.status.val == 0 {
+                println!("No drive found");
+            }
+            else {
+                println!("Written command, waiting");
+                self.wait_bsy();
+                println!("Busy signal low, waiting for drive ready");
+                self.wait_drq();
+                println!("Collecting data");
+                for i in 0..256 {
+                    data[i] = data_reg.read();
+                }
+            }
+        }
+        println!("Exiting...");
+        return data;
     }
 }
 

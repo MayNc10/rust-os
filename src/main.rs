@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use rust_os::println;
+use rust_os::{println, disk};
 use rust_os::task::{executor::Executor, keyboard, Task};
 use bootloader::{entry_point, BootInfo};
 use x86_64::instructions::port::{Port, PortGeneric, ReadWriteAccess};
@@ -31,43 +31,11 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     #[cfg(test)]
     test_main();
 
-    let mut status = Port::new(0x1F7);
-    for _ in 0..14 {
-        unsafe { status.read(); }
-    }
-    println!("Old status: {}", unsafe { status.read() });
-    let mut dselect = Port::new(0x1F6);
-    unsafe { dselect.write(0xA0_u8); }
-    println!("Selected drive");
-    for i in 0..4 {
-        let mut p = Port::new(0x1F2 + i);
-        unsafe { p.write(0x0_u8); }
-    }
-    println!("Set ports low");
-    for _ in 0..14 {
-        unsafe { let s = status.read(); }
-    }
-    let mut s: u8 = unsafe { status.read() };
-    if s == 0 { println!("No drive"); }
-    else {
-        println!("Drive found");
-        println!("{}", s);
-        let mut mid: PortGeneric<u8, ReadWriteAccess> = Port::new(0x1F4);
-        let mut hi: PortGeneric<u8, ReadWriteAccess> = Port::new(0x1F5);
-        unsafe {
-            println!("LBAmid: {}, LBAhi: {}", mid.read(), hi.read());
-        }
+    x86_64::instructions::interrupts::disable();
+    println!("{:?}", disk::pio::DRIVER.lock().identify(false));
+    x86_64::instructions::interrupts::enable();
 
-        while (s & 0x80) > 0 { s = unsafe { status.read() }; }
-        while (s & 0x8) == 0 { s = unsafe { status.read() }; }
-        let mut datap = Port::new(0x1F0);
-        let mut data = [0_u16; 256];
-        for i in 0..256 { 
-            println!("Reading data, {i}/256 done");
-            data[i] = unsafe { datap.read() }; 
-        }
-        println!("{:?}", data);
-    }
+    println!("hi");
 
     let mut executor = Executor::new();
     executor.spawn(Task::new(keyboard::print_keypresses()));
