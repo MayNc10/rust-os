@@ -14,10 +14,10 @@ pub enum IOPortRead {
     DataRegister = 0,
     ErrorRegister,
     SectorCountRegister,
-    SectorNumberRegister,
-    CylinderLowRegister,
-    CylinderHighRegister,
-    DriveAndHeadRegister,
+    LBALow,
+    LBAMid,
+    LBAHigh,
+    DriveSelectRegister,
     StatusRegister,
 }
 
@@ -100,27 +100,32 @@ pub mod error {
     }
 }
 
+type Disk = u8;
+
+#[repr(u8)]
 #[derive(Clone, Copy)]
-pub enum Disk {
-    Primary,
+pub enum Bus {
+    Primary = 0,
     Secondary,
-    None,
 }
 
-pub static DISK_IO_BASES: [u16; 2] = [ATA_IO_PORT_PRIMARY, ATA_IO_PORT_SECONDARY];
-pub static DISK_CONTROL_BASES: [u16; 2] = [ATA_CONTROL_PORT_PRIMARY, ATA_CONTROL_PORT_SECONDARY];
+
+pub static BUS_IO_BASES: [u16; 2] = [ATA_IO_PORT_PRIMARY, ATA_IO_PORT_SECONDARY];
+pub static BUS_CONTROL_BASES: [u16; 2] = [ATA_CONTROL_PORT_PRIMARY, ATA_CONTROL_PORT_SECONDARY];
 
 pub struct Driver {
     status: status::Status,
     disk: Disk,
+    bus: Bus,
 }
 
 impl Driver {
     pub fn new() -> Driver {
-        let disk = Disk::Primary;
-        let mut p = Port::new(DISK_IO_BASES[disk as u8 as usize] + IOPortRead::StatusRegister as u16);
+        let disk = 1;
+        let bus = Bus::Primary;
+        let mut p = Port::new(BUS_IO_BASES[bus as u8 as usize] + IOPortRead::StatusRegister as u16);
         let status = status::Status { val: unsafe { p.read() } };
-        Driver { status, disk }
+        Driver { status, disk, bus}
     }
     pub fn wait_bsy(&mut self) {
         self.read_status();
@@ -145,20 +150,20 @@ impl Driver {
     pub fn read(&mut self, buf: &mut [u16], lba: u32, sector_count: u8) {
         println!("In read");
         self.wait_bsy();
-        let mut dh_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DriveAndHeadRegister as u16);
-        let mut sec_count_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorCountRegister as u16);
-        let mut lba_lo_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorNumberRegister as u16);
-        let mut lba_mid_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderLowRegister as u16);
-        let mut lba_high_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderHighRegister as u16);
-        let mut cmd_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortWrite::CommandRegister as u16);
-        let mut data_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DataRegister as u16);
+        let mut dsel_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
+        let mut sec_count_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::SectorCountRegister as u16);
+        let mut lba_lo_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBALow as u16);
+        let mut lba_mid_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBAMid as u16);
+        let mut lba_high_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBAHigh as u16);
+        let mut cmd_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortWrite::CommandRegister as u16);
+        let mut data_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DataRegister as u16);
 
         unsafe {
-            dh_reg.write(0xE0 | ((lba >> 24) & 0xF)); // Hardcode  'master' (0xE0)
+            dsel_reg.write(if self.disk == 0 { 0x0 } else {  0x1 << 4 } | ((lba >> 24) & 0xF) | (0x1 << 6)); 
             sec_count_reg.write(sector_count);
             lba_lo_reg.write((lba & 0xFF) as u8);
-            lba_mid_reg.write((lba >> 8 & 0xFF) as u8);
-            lba_high_reg.write((lba >> 16 & 0xFF) as u8);
+            lba_mid_reg.write(((lba >> 8) & 0xFF) as u8);
+            lba_high_reg.write(((lba >> 16) & 0xFF) as u8);
             cmd_reg.write(READ_COMMAND);
             
             println!("Set up, Starting read");
@@ -178,13 +183,13 @@ impl Driver {
     }
     pub fn write(&mut self, data: &mut [u16], lba: u32, sector_count: u8) {
         self.wait_bsy();
-        let mut dh_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DriveAndHeadRegister as u16);
-        let mut sec_count_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorCountRegister as u16);
-        let mut lba_lo_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorNumberRegister as u16);
-        let mut lba_mid_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderLowRegister as u16);
-        let mut lba_high_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderHighRegister as u16);
-        let mut cmd_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortWrite::CommandRegister as u16);
-        let mut data_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DataRegister as u16);
+        let mut dh_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
+        let mut sec_count_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::SectorCountRegister as u16);
+        let mut lba_lo_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBALow as u16);
+        let mut lba_mid_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBAMid as u16);
+        let mut lba_high_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBAHigh as u16);
+        let mut cmd_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortWrite::CommandRegister as u16);
+        let mut data_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DataRegister as u16);
 
         unsafe {
             dh_reg.write(0xE0 | ((lba >> 24) & 0xF)); // Hardcode  'master' (0xE0)
@@ -205,19 +210,19 @@ impl Driver {
     }
     pub fn status(&self) -> status::Status { self.status }
     pub fn read_status(&mut self) {
-        let mut p = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::StatusRegister as u16);
+        let mut p = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::StatusRegister as u16);
         self.status = status::Status { val: unsafe { p.read() } };
     }
     pub fn identify_device(&mut self) -> [u8; 512] {
         self.wait_bsy();
         self.wait_rdy();
-        let mut dh_reg: PortGeneric<u8, ReadWriteAccess> = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DriveAndHeadRegister as u16);
+        let mut dh_reg: PortGeneric<u8, ReadWriteAccess> = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
         //let mut sec_count_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorCountRegister as u16);
         //let mut lba_lo_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorNumberRegister as u16);
         //let mut lba_mid_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderLowRegister as u16);
         //let mut lba_high_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderHighRegister as u16);
-        let mut data_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DataRegister as u16);
-        let mut cmd_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortWrite::CommandRegister as u16);
+        let mut data_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DataRegister as u16);
+        let mut cmd_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortWrite::CommandRegister as u16);
         let buf = [0_u8; 512];
 
         unsafe {
@@ -234,18 +239,18 @@ impl Driver {
     pub fn identify(&mut self, is_master_drive: bool) -> [u16; 256] {
         println!("Identifying device");
 
-        let mut dh_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DriveAndHeadRegister as u16);
-        let mut sec_count_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorCountRegister as u16);
-        let mut lba_lo_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::SectorNumberRegister as u16);
-        let mut lba_mid_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderLowRegister as u16);
-        let mut lba_high_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::CylinderHighRegister as u16);
-        let mut cmd_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortWrite::CommandRegister as u16);
-        let mut data_reg = Port::new(DISK_IO_BASES[self.disk as u8 as usize] + IOPortRead::DataRegister as u16);
+        let mut dh_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
+        let mut sec_count_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::SectorCountRegister as u16);
+        let mut lba_lo_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBALow as u16);
+        let mut lba_mid_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBAMid as u16);
+        let mut lba_high_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBAHigh as u16);
+        let mut cmd_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortWrite::CommandRegister as u16);
+        let mut data_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DataRegister as u16);
 
         let mut data = [0; 256];
         unsafe {
             println!("Writing drive selection and port zeros");
-            dh_reg.write(0xB0_u8);
+            dh_reg.write(if is_master_drive { 0xA0_u8 } else { 0xB0_u8 });
             sec_count_reg.write(0x0_u8);
             lba_lo_reg.write(0x0_u8);
             lba_mid_reg.write(0x0_u8);
@@ -270,6 +275,22 @@ impl Driver {
         }
         println!("Exiting...");
         return data;
+    }
+    pub fn drive_selected(&self) -> Option<Disk> {
+        let mut da_reg = Port::new(BUS_CONTROL_BASES[self.bus as u8 as usize] + 1);
+        unsafe {
+            let drive_addr: u8 = da_reg.read();
+            if drive_addr & 0x1 == drive_addr & 0x2 { None }
+            else { Some(drive_addr & 0x3) }
+        }
+    }
+    pub fn change_disk(&mut self, disk: Disk) {
+        self.disk = disk;
+        let mut dsel_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
+        unsafe {
+            dsel_reg.write(0xA0 + (disk << 4))
+        }
+        self.read_status();
     }
 }
 

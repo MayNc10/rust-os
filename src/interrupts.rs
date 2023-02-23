@@ -12,6 +12,20 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard,
+    PIC2,
+    Serial1,
+    Serial2,
+    ParallelPort2,
+    Floppy,
+    ParallelPort1,
+    RTC,
+    ACPI,
+    Unused1,
+    Unused2,
+    Mouse,
+    CoProcessor,
+    PrimaryAta,
+    SecondaryAta,
 }
 
 impl InterruptIndex {
@@ -39,6 +53,8 @@ lazy_static! {
         }
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::PrimaryAta.as_usize()].set_handler_fn(primary_ata_interrupt_handler);
+        idt[InterruptIndex::SecondaryAta.as_usize()].set_handler_fn(secondary_ata_interrupt_handler);
         idt
     };
 }
@@ -88,6 +104,22 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     let scancode: u8 = unsafe { port.read() };
     crate::task::keyboard::add_scancode(scancode);
 
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    }
+}
+
+extern "x86-interrupt" fn primary_ata_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    x86_64::instructions::interrupts::without_interrupts(|| { println!("Primary ATA Interrupt") } );
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    }
+}
+
+extern "x86-interrupt" fn secondary_ata_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    x86_64::instructions::interrupts::without_interrupts(|| { println!("Secondary ATA Interrupt") } );
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
