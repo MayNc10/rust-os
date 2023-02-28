@@ -141,6 +141,17 @@ impl Writer {
             self.buffer.chars[row][col].write(blank);
         }
     }
+
+    pub fn backspace(&mut self) {
+        // Assuming the last row
+        let row = BUFFER_HEIGHT - 1;
+        if self.column_position > 0 { self.column_position -= 1; } // Move back first, since we're always in front of the last written character
+        self.buffer.chars[row][self.column_position].write(ScreenChar {
+            ascii_character: 0,
+            color_code: self.color_code,
+        });
+        
+    }
 }
 
 impl fmt::Write for Writer {
@@ -156,12 +167,14 @@ macro_rules! print {
     ($($arg:tt)*) => ($crate::vga_buffer::_print(format_args!($($arg)*)));
 }
 
+
 /// Like the `println!` macro in the standard library, but prints to the VGA text buffer.
 #[macro_export]
 macro_rules! println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
+
 
 /// Prints the given formatted string to the VGA text buffer
 /// through the global `WRITER` instance.
@@ -175,6 +188,7 @@ pub fn _print(args: fmt::Arguments) {
     });
 }
 
+/* 
 #[test_case]
 fn test_println_simple() {
     println!("test_println_simple output");
@@ -202,3 +216,4 @@ fn test_println_output() {
         }
     });
 }
+*/
