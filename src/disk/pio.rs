@@ -121,7 +121,7 @@ pub struct Driver {
 
 impl Driver {
     pub fn new() -> Driver {
-        let disk = 1;
+        let disk = 0;
         let bus = Bus::Primary;
         let mut p = Port::new(BUS_IO_BASES[bus as u8 as usize] + IOPortRead::StatusRegister as u16);
         let status = status::Status { val: unsafe { p.read() } };
@@ -159,7 +159,8 @@ impl Driver {
         let mut data_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DataRegister as u16);
 
         unsafe {
-            dsel_reg.write(if self.disk == 0 { 0x0 } else {  0x1 << 4 } | ((lba >> 24) & 0xF) | (0x1 << 6)); 
+            let top_byte = (lba >> 24) & 0xF;
+            dsel_reg.write({self.disk << 4} | top_byte as u8 | (0x1 << 6)); 
             sec_count_reg.write(sector_count);
             lba_lo_reg.write((lba & 0xFF) as u8);
             lba_mid_reg.write(((lba >> 8) & 0xFF) as u8);
@@ -183,7 +184,7 @@ impl Driver {
     }
     pub fn write(&mut self, data: &mut [u16], lba: u32, sector_count: u8) {
         self.wait_bsy();
-        let mut dh_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
+        let mut dsel_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
         let mut sec_count_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::SectorCountRegister as u16);
         let mut lba_lo_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBALow as u16);
         let mut lba_mid_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::LBAMid as u16);
@@ -192,7 +193,8 @@ impl Driver {
         let mut data_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DataRegister as u16);
 
         unsafe {
-            dh_reg.write(0xE0 | ((lba >> 24) & 0xF)); // Hardcode  'master' (0xE0)
+            let top_byte = (lba >> 24) & 0xF;
+            dsel_reg.write({self.disk << 4} | top_byte as u8 | (0x1 << 6)); 
             sec_count_reg.write(sector_count);
             lba_lo_reg.write((lba & 0xFF) as u8);
             lba_mid_reg.write((lba >> 8 & 0xFF) as u8);
@@ -213,6 +215,7 @@ impl Driver {
         let mut p = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::StatusRegister as u16);
         self.status = status::Status { val: unsafe { p.read() } };
     }
+    /* 
     pub fn identify_device(&mut self) -> [u8; 512] {
         self.wait_bsy();
         self.wait_rdy();
@@ -236,7 +239,8 @@ impl Driver {
         }
         buf
     }
-    pub fn identify(&mut self, is_master_drive: bool) -> [u16; 256] {
+    */
+    pub fn identify(&mut self) -> [u16; 256] {
         println!("Identifying device");
 
         let mut dh_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
@@ -250,7 +254,7 @@ impl Driver {
         let mut data = [0; 256];
         unsafe {
             println!("Writing drive selection and port zeros");
-            dh_reg.write(if is_master_drive { 0xA0_u8 } else { 0xB0_u8 });
+            dh_reg.write(0xA0_u8 | (self.disk << 4) ); //if is_master_drive { 0xA0_u8 } else { 0xB0_u8 }
             sec_count_reg.write(0x0_u8);
             lba_lo_reg.write(0x0_u8);
             lba_mid_reg.write(0x0_u8);
@@ -286,11 +290,24 @@ impl Driver {
     }
     pub fn change_disk(&mut self, disk: Disk) {
         self.disk = disk;
-        let mut dsel_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
+        //let mut dsel_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
         unsafe {
-            dsel_reg.write(0xA0 + (disk << 4))
+            //dsel_reg.write(0xA0 | (disk << 4))
         }
         self.read_status();
+    }
+    pub fn current_disk(&self) -> Disk {
+        let mut daddr_reg = Port::new(BUS_CONTROL_BASES[self.bus as u8 as usize] 
+            + ControlPortRead::DriveAddressRegister as u16);
+        unsafe {
+            let addr: u8 = daddr_reg.read();
+            if addr & 1 == 0 { return 0; }
+            else if addr & 2 == 0 { return 1; }
+            else { panic!("Illegal drive address: {}", addr) }
+        }
+    }
+    pub fn change_bus(&mut self, bus: Bus) {
+        self.bus = bus;
     }
 }
 

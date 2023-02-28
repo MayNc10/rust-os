@@ -10,6 +10,7 @@
 extern crate alloc;
 use core::panic::PanicInfo;
 
+
 pub mod allocator;
 pub mod disk;
 pub mod gdt;
@@ -78,6 +79,7 @@ pub fn hlt_loop() -> ! {
     }
 }
 
+/* 
 #[cfg(test)]
 use bootloader::{entry_point, BootInfo};
 
@@ -102,3 +104,4 @@ fn panic(info: &PanicInfo) -> ! {
 fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)
 }
+*/
