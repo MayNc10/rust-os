@@ -148,7 +148,6 @@ impl Driver {
         }
     }
     pub fn read(&mut self, buf: &mut [u16], lba: u32, sector_count: u8) {
-        println!("In read");
         self.wait_bsy();
         let mut dsel_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::DriveSelectRegister as u16);
         let mut sec_count_reg = Port::new(BUS_IO_BASES[self.bus as u8 as usize] + IOPortRead::SectorCountRegister as u16);
@@ -166,21 +165,15 @@ impl Driver {
             lba_mid_reg.write(((lba >> 8) & 0xFF) as u8);
             lba_high_reg.write(((lba >> 16) & 0xFF) as u8);
             cmd_reg.write(READ_COMMAND);
-            
-            println!("Set up, Starting read");
 
             for sec in 0..sector_count as usize {
-                println!("Waiting to read sector");
                 self.wait_bsy();
-                println!("Waiting for ready");
                 self.wait_drq();
-                println!("Reading sector");
                 for word in 0..256 {
                     buf[sec * 256 + word as usize] = data_reg.read();
                 }
             }
         }   
-        println!("Finished read");
     }
     pub fn write(&mut self, data: &mut [u16], lba: u32, sector_count: u8) {
         self.wait_bsy();
