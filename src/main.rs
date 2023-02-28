@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use rust_os::{println, disk, print};
+use rust_os::{println, disk, print, hlt_loop};
 use rust_os::task::{executor::Executor, keyboard, Task};
 use bootloader::{entry_point, BootInfo};
 use x86_64::instructions::port::{Port, PortGeneric, ReadWriteAccess};
@@ -19,7 +19,6 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     use rust_os::memory::{self, BootInfoFrameAllocator};
     use x86_64::VirtAddr;
 
-    println!("Hello World{}", "!");
     rust_os::init();
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
@@ -28,31 +27,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
-    #[cfg(test)]
-    test_main();
-
-
-    const SEC_COUNT: u8 = 1;
-    const LBA: u32 = 0x0;
-    let mut buf1 = [0; SEC_COUNT as usize * 256];
-    let mut buf2 = [0; SEC_COUNT as usize * 256];
-    x86_64::instructions::interrupts::disable();
-    disk::pio::DRIVER.lock().read(&mut buf1, LBA, SEC_COUNT);
-    disk::pio::DRIVER.lock().change_disk(1);
-    disk::pio::DRIVER.lock().read(&mut buf2, LBA, SEC_COUNT);
-    assert_ne!(buf1, buf2);
-    x86_64::instructions::interrupts::enable();
-    //println!("LBA: {LBA}, sector count: {SEC_COUNT}, data:");
-    //for word in buf {
-    //    print!("{:X}", (word & 0xFF) as u8);
-    //    print!("{:X}", (word >> 8) as u8);
-    //}
-    //println!();
-
-    println!("hi");
+    //println!("Anything you type will be forwarded to the disk");
 
     let mut executor = Executor::new();
-    executor.spawn(Task::new(keyboard::print_keypresses()));
+    executor.spawn(Task::new(keyboard::text_editor()));
     executor.run();
 }
 

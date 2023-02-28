@@ -1,4 +1,4 @@
-use core::fmt;
+use core::fmt::{self, Write};
 use lazy_static::lazy_static;
 use spin::Mutex;
 use volatile::Volatile;
@@ -7,10 +7,18 @@ lazy_static! {
     /// A global `Writer` instance that can be used for printing to the VGA text buffer.
     ///
     /// Used by the `print!` and `println!` macros.
-    pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
-        column_position: 0,
-        color_code: ColorCode::new(Color::Yellow, Color::Black),
-        buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
+    pub static ref WRITER: Mutex<Writer> = Mutex::new({
+        for c in 0..(BUFFER_WIDTH * BUFFER_HEIGHT) {
+            unsafe {
+                *((0xb8000 + c * 2) as *mut u16) = 0;
+            }
+
+        }
+        Writer {
+            column_position: 0,
+            color_code: ColorCode::new(Color::Yellow, Color::Black),
+            buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
+        }
     });
 }
 
@@ -145,7 +153,22 @@ impl Writer {
     pub fn backspace(&mut self) {
         // Assuming the last row
         let row = BUFFER_HEIGHT - 1;
-        if self.column_position > 0 { self.column_position -= 1; } // Move back first, since we're always in front of the last written character
+        if self.column_position > 0 { 
+            self.column_position -= 1;
+        } 
+        else {
+            // Send everything down a row
+            for row in (1..BUFFER_HEIGHT).rev() {
+                for col in 0..BUFFER_WIDTH {
+                    let character = self.buffer.chars[row - 1][col].read();
+                    self.buffer.chars[row][col].write(character);
+                }
+            }
+            self.clear_row(0);
+            // Seek back to newline
+            self.column_position = BUFFER_WIDTH - 1;
+            while self.buffer.chars[BUFFER_HEIGHT - 1][self.column_position].read().ascii_character == 0 { self.column_position -= 1; }
+        }
         self.buffer.chars[row][self.column_position].write(ScreenChar {
             ascii_character: 0,
             color_code: self.color_code,

@@ -10,7 +10,6 @@
 extern crate alloc;
 use core::panic::PanicInfo;
 
-
 pub mod allocator;
 pub mod disk;
 pub mod gdt;
@@ -22,6 +21,7 @@ pub mod time;
 pub mod vga_buffer;
 
 pub fn init() {
+    disk::pio::DRIVER.lock().change_disk(1);
     gdt::init();
     interrupts::init_idt();
     unsafe { interrupts::PICS.lock().initialize() };
