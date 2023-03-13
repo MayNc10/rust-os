@@ -1,4 +1,5 @@
 use core::fmt::{self, Write};
+use alloc::string::String;
 use lazy_static::lazy_static;
 use spin::Mutex;
 use volatile::Volatile;
@@ -18,6 +19,7 @@ lazy_static! {
             column_position: 0,
             color_code: ColorCode::new(Color::Yellow, Color::Black),
             buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
+            cmd_start: (0, 0) // should set in init();
         }
     });
 }
@@ -45,14 +47,22 @@ pub enum Color {
     White = 15,
 }
 
+pub static COLOR_LIST: [Color; 16] = 
+    [Color::Black, Color::Blue, Color::Green, Color::Cyan, Color::Red, Color::Magenta, Color::Brown, Color::LightGray, Color::DarkGray, 
+     Color::LightBlue, Color::LightGreen, Color::LightCyan, Color::LightRed, Color::Pink, Color::Yellow, Color::White];
+
+pub static COLOR_NAME_LIST: [&'static str; 16] = 
+    ["Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Brown", "LightGray", "DarkGray",
+     "LightBlue", "LightGreen", "LightCyan", "LightRed", "Pink", "Yellow", "White"];
+
 /// A combination of a foreground and a background color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
-struct ColorCode(u8);
+pub struct ColorCode(u8);
 
 impl ColorCode {
     /// Create a new `ColorCode` with the given foreground and background colors.
-    fn new(foreground: Color, background: Color) -> ColorCode {
+    pub fn new(foreground: Color, background: Color) -> ColorCode {
         ColorCode((background as u8) << 4 | (foreground as u8))
     }
 }
@@ -66,9 +76,9 @@ struct ScreenChar {
 }
 
 /// The height of the text buffer (normally 25 lines).
-const BUFFER_HEIGHT: usize = 25;
+pub const BUFFER_HEIGHT: usize = 25;
 /// The width of the text buffer (normally 80 columns).
-const BUFFER_WIDTH: usize = 80;
+pub const BUFFER_WIDTH: usize = 80;
 
 /// A structure representing the VGA text buffer.
 #[repr(transparent)]
@@ -84,6 +94,8 @@ pub struct Writer {
     column_position: usize,
     color_code: ColorCode,
     buffer: &'static mut Buffer,
+    // stuff for cmd, should extract
+    cmd_start: (usize, usize) // row, col
 }
 
 impl Writer {
@@ -137,10 +149,12 @@ impl Writer {
         }
         self.clear_row(BUFFER_HEIGHT - 1);
         self.column_position = 0;
+        if self.cmd_start.0 > 0 { self.cmd_start.0 -= 1; } // Decrease cmd start
+        //else { panic!("Command goes off the screen, implement actual screenbuffer to fix!"); }
     }
 
     /// Clears a row by overwriting it with blank characters.
-    fn clear_row(&mut self, row: usize) {
+    pub fn clear_row(&mut self, row: usize) {
         let blank = ScreenChar {
             ascii_character: b' ',
             color_code: self.color_code,
@@ -148,6 +162,13 @@ impl Writer {
         for col in 0..BUFFER_WIDTH {
             self.buffer.chars[row][col].write(blank);
         }
+    }
+
+    pub fn reset_screen(&mut self) {
+        for row in 0..BUFFER_HEIGHT {
+            self.clear_row(row);
+        }
+        self.column_position = 0;
     }
 
     pub fn backspace(&mut self) {
@@ -174,6 +195,54 @@ impl Writer {
             color_code: self.color_code,
         });
         
+    }
+
+    pub fn last_char(&self) -> char {
+        self.buffer.chars[BUFFER_HEIGHT - 1][self.column_position - 1].read().ascii_character as char
+    }
+    pub fn scan_until_or_all(&self, c: char) -> String {
+        let mut s = String::new();
+        let mut row = BUFFER_HEIGHT - 1;
+        let mut col = self.column_position - 1;
+        while self.buffer.chars[row][col].read().ascii_character as char != c {//&& self.buffer.chars[row][col].read().ascii_character != 0 {
+            if self.buffer.chars[row][col].read().ascii_character != 0 {
+                s.insert(0, self.buffer.chars[row][col].read().ascii_character as char);
+            }
+            if col == 0 {
+                col = BUFFER_WIDTH - 1;
+                if row == 0 { break; }
+                row -= 1;
+            }
+            else { col -= 1; }
+        }
+        s
+    }
+    pub fn reset_cmd_start(&mut self) {
+        self.cmd_start = (BUFFER_HEIGHT - 1, self.column_position);
+        //let start = self.cmd_start;
+        //self.write_fmt(format_args!("{:?}", start)).unwrap();
+    }
+    pub fn scan_cmd(&self) -> String {
+        let mut s = String::new();
+        let mut row = BUFFER_HEIGHT - 1;
+        let mut col = self.column_position;
+        let start = self.cmd_start;
+        while row > self.cmd_start.0 || ( row == self.cmd_start.0 && col >= self.cmd_start.1) {//&& self.buffer.chars[row][col].read().ascii_character != 0 {
+            if self.buffer.chars[row][col].read().ascii_character != 0 {
+                s.insert(0, self.buffer.chars[row][col].read().ascii_character as char);
+            }
+            if col == 0 {
+                col = BUFFER_WIDTH - 1;
+                if row == 0 { break; }
+                row -= 1;
+            }
+            else { col -= 1; }
+        }
+        s
+    }
+
+    pub fn set_color(&mut self, color: ColorCode) {
+        self.color_code = color;
     }
 }
 

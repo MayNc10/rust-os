@@ -4,11 +4,15 @@
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
 #![feature(const_mut_refs)]
+#![feature(iter_intersperse)]
+#![feature(let_chains)]
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
-use core::panic::PanicInfo;
+use core::{panic::PanicInfo, fmt::Write};
+
+use crate::vga_buffer::WRITER;
 
 pub mod allocator;
 pub mod disk;
@@ -25,6 +29,9 @@ pub fn init() {
     gdt::init();
     interrupts::init_idt();
     unsafe { interrupts::PICS.lock().initialize() };
+    println!();
+    print!("$> ");
+    WRITER.lock().reset_cmd_start();
     x86_64::instructions::interrupts::enable();
 }
 pub trait Testable {

@@ -94,7 +94,7 @@ pub struct DiskWriter {
     pub current_lba: u32,
     pub current_buf: [u16; 256],
     pub current_buf_offset: u16,
-    is_in_word: bool,
+    pub is_in_word: bool,
 }
 
 lazy_static! {
@@ -113,71 +113,75 @@ pub async fn text_editor() {
     while let Some(scancode) = scancodes.next().await {
         if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
             if let Some(key) = keyboard.process_keyevent(key_event) {
-                match key {
-                    DecodedKey::Unicode(character) => {
-                        if character as u32 == 8 {
-                            // this isn't great, but it kinda works so we'll roll with it
-                            WRITER.lock().backspace();
-                            let mut writer = DISK_WRITER.lock();
-                            // first, try to move back
-                            if writer.current_buf_offset == 0 && !writer.is_in_word {
-                                if writer.current_lba != 0 {
-                                    writer.current_lba -= 1;
-                                    writer.current_buf_offset = 255;
-                                    let lba = writer.current_lba;
-                                    x86_64::instructions::interrupts::without_interrupts(||
-                                        pio::DRIVER.lock().read(&mut writer.current_buf, lba, 1));
-                                }
-                            }
-                            else if !writer.is_in_word { writer.current_buf_offset -= 1; }
-                            writer.is_in_word = !writer.is_in_word;
-                            
-                            let off = writer.current_buf_offset as usize;
-                            if !writer.is_in_word {
-                                writer.current_buf[off] = 0;
-                            } else {
-                                writer.current_buf[off] &= 0xFF; // clear high bytes
-                            }
-                            
-                            // Flush buffer
-                            let lba = writer.current_lba;
-                            x86_64::instructions::interrupts::without_interrupts(||
-                                pio::DRIVER.lock().write(&mut writer.current_buf, lba, 1));
-                        } else {
-                            print!("{}", character);
-                            let mut writer = DISK_WRITER.lock();
-                            let off = writer.current_buf_offset as usize;
-                            if !writer.is_in_word {
-                                writer.current_buf[off] = character as u32 as u16;
-                            } else {
-                                writer.current_buf[off] |= (character as u32 as u16) << 8; // set high bytes
-                            }
-                            if writer.is_in_word { writer.current_buf_offset += 1; }
-                            writer.is_in_word = !writer.is_in_word;
-
-                            // Flush buffer (not much of a buffer I know)
-                            let lba = writer.current_lba;
-                            x86_64::instructions::interrupts::without_interrupts(||
-                                pio::DRIVER.lock().write(&mut writer.current_buf, lba, 1));
-
-                            
-                            if writer.current_buf_offset == 256 {
-                                // go to next sector
-                                // first, output the current cached buf
-                                
-                                writer.current_lba += 1;
-                                writer.current_buf_offset = 0;
-                                writer.is_in_word = false;
-                                let lba = writer.current_lba;
-                                x86_64::instructions::interrupts::without_interrupts(||
-                                    pio::DRIVER.lock().read(&mut writer.current_buf, lba, 1));
-                            }
-                            //println!("Leaving buffer step");
-                        }
-                    },
-                    DecodedKey::RawKey(_key) => {},
-                }
+                text_edit_process_key(key);
             }
         }
+    }
+}
+
+pub fn text_edit_process_key(key: DecodedKey) {
+    match key {
+        DecodedKey::Unicode(character) => {
+            if character as u32 == 8 {
+                // this isn't great, but it kinda works so we'll roll with it
+                WRITER.lock().backspace();
+                let mut writer = DISK_WRITER.lock();
+                // first, try to move back
+                if writer.current_buf_offset == 0 && !writer.is_in_word {
+                    if writer.current_lba != 0 {
+                        writer.current_lba -= 1;
+                        writer.current_buf_offset = 255;
+                        let lba = writer.current_lba;
+                        x86_64::instructions::interrupts::without_interrupts(||
+                            pio::DRIVER.lock().read(&mut writer.current_buf, lba, 1));
+                    }
+                }
+                else if !writer.is_in_word { writer.current_buf_offset -= 1; }
+                writer.is_in_word = !writer.is_in_word;
+                
+                let off = writer.current_buf_offset as usize;
+                if !writer.is_in_word {
+                    writer.current_buf[off] = 0;
+                } else {
+                    writer.current_buf[off] &= 0xFF; // clear high bytes
+                }
+                
+                // Flush buffer
+                let lba = writer.current_lba;
+                x86_64::instructions::interrupts::without_interrupts(||
+                    pio::DRIVER.lock().write(&mut writer.current_buf, lba, 1));
+            } else {
+                print!("{}", character);
+                let mut writer = DISK_WRITER.lock();
+                let off = writer.current_buf_offset as usize;
+                if !writer.is_in_word {
+                    writer.current_buf[off] |= character as u32 as u16;
+                } else {
+                    writer.current_buf[off] |= (character as u32 as u16) << 8; // set high bytes
+                }
+                if writer.is_in_word { writer.current_buf_offset += 1; }
+                writer.is_in_word = !writer.is_in_word;
+
+                // Flush buffer (not much of a buffer I know)
+                let lba = writer.current_lba;
+                x86_64::instructions::interrupts::without_interrupts(||
+                    pio::DRIVER.lock().write(&mut writer.current_buf, lba, 1));
+
+                
+                if writer.current_buf_offset == 256 {
+                    // go to next sector
+                    // first, output the current cached buf
+                    
+                    writer.current_lba += 1;
+                    writer.current_buf_offset = 0;
+                    writer.is_in_word = false;
+                    let lba = writer.current_lba;
+                    x86_64::instructions::interrupts::without_interrupts(||
+                        pio::DRIVER.lock().read(&mut writer.current_buf, lba, 1));
+                }
+                //println!("Leaving buffer step");
+            }
+        },
+        DecodedKey::RawKey(_key) => {},
     }
 }

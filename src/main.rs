@@ -6,8 +6,11 @@
 
 extern crate alloc;
 
+use rust_os::disk::pio::DRIVER;
+use rust_os::task::cli::dclear;
+use rust_os::task::keyboard::text_editor;
 use rust_os::{println, disk, print, hlt_loop};
-use rust_os::task::{executor::Executor, keyboard, Task};
+use rust_os::task::{executor::Executor, keyboard, Task, cli};
 use bootloader::{entry_point, BootInfo};
 use x86_64::instructions::port::{Port, PortGeneric, ReadWriteAccess};
 use core::panic::PanicInfo;
@@ -30,7 +33,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     //println!("Anything you type will be forwarded to the disk");
 
     let mut executor = Executor::new();
-    executor.spawn(Task::new(keyboard::text_editor()));
+    executor.spawn(Task::new(cli::cli()));
     executor.run();
 }
 
@@ -61,3 +64,4 @@ async fn example_task() {
 fn trivial_assertion() {
     assert_eq!(1, 1);
 }
+
