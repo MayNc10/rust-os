@@ -244,6 +244,12 @@ impl Writer {
     pub fn set_color(&mut self, color: ColorCode) {
         self.color_code = color;
     }
+    pub fn cmd_start(&self) -> (usize, usize) {
+        self.cmd_start
+    }
+    pub fn current_pos(&self) -> (usize, usize) {
+        (BUFFER_HEIGHT - 1, self.column_position)
+    }
 }
 
 impl fmt::Write for Writer {

@@ -1,4 +1,4 @@
-use crate::{print, println, vga_buffer::WRITER, disk::pio};
+use crate::{print, println, vga_buffer::{WRITER, BUFFER_WIDTH}, disk::pio};
 use conquer_once::spin::OnceCell;
 use lazy_static::lazy_static;
 use spin::Mutex;
@@ -78,7 +78,11 @@ pub async fn print_keypresses() {
                 match key {
                     DecodedKey::Unicode(character) => {
                         if character as u32 == 8 {
-                            WRITER.lock().backspace();
+                            let mut writer = WRITER.lock();
+                            let cur_pos = writer.current_pos();
+                            let start = writer.cmd_start();
+                            let pos = |pos: (usize, usize)| pos.0 * BUFFER_WIDTH + pos.1;
+                            if pos(cur_pos) > pos(start) { writer.backspace(); }
                         } else {
                             print!("{}", character);
                         }
@@ -95,6 +99,30 @@ pub struct DiskWriter {
     pub current_buf: [u16; 256],
     pub current_buf_offset: u16,
     pub is_in_word: bool,
+}
+impl DiskWriter {
+    pub unsafe fn init(&mut self) {
+        // kinda hacky, assume we never write a 0 into the disk ourselves
+        let mut lba = 0;
+        let mut buf = [0; 256];
+        while {
+            pio::DRIVER.lock().read(&mut buf, lba, 1);
+            let last_written_pos = buf.iter().position(|v| *v == 0);
+            if let Some(p) = last_written_pos {
+                self.current_buf_offset = p as u16;
+                if self.current_buf_offset != 0 && (buf[self.current_buf_offset as usize - 1] >> 8) == 0 {
+                    self.current_buf_offset -= 1;
+                    self.is_in_word = true;
+                }
+                false
+            } else { true }
+
+        } {
+            lba += 1;
+        }
+        self.current_lba = lba;
+        self.current_buf = buf;
+    }
 }
 
 lazy_static! {

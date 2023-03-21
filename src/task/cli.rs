@@ -1,7 +1,7 @@
 use core::str::SplitAsciiWhitespace;
 use spin::Mutex;
 
-use crate::{print, println, vga_buffer::{WRITER, Color, COLOR_LIST, ColorCode, BUFFER_HEIGHT, COLOR_NAME_LIST}, disk::pio::DRIVER};
+use crate::{print, println, vga_buffer::{WRITER, Color, COLOR_LIST, ColorCode, BUFFER_HEIGHT, COLOR_NAME_LIST, BUFFER_WIDTH}, disk::pio::DRIVER};
 use conquer_once::spin::OnceCell;
 use lazy_static::lazy_static;
 use alloc::string::String;
@@ -45,10 +45,11 @@ pub async fn cli() {
                     match key {
                         DecodedKey::Unicode(character) => {
                             if character as u32 == 8 {
-                                // make sure we don't overwrite buffer character
-                                if WRITER.lock().last_char() != BUFFER_CHAR {
-                                    WRITER.lock().backspace();
-                                }
+                                let mut writer = WRITER.lock();
+                                let cur_pos = writer.current_pos();
+                                let start = writer.cmd_start();
+                                let pos = |pos: (usize, usize)| pos.0 * BUFFER_WIDTH + pos.1;
+                                if pos(cur_pos) > pos(start) { writer.backspace(); }
                             }
                             else if character == '\n' as char {
                                 println!();
@@ -90,6 +91,14 @@ fn handle_command(command: String) {
             WRITER.lock().reset_screen();
             // just hack
             *IS_TEXT_MODE.lock() = true;
+            // dump disk contents
+            let writer =  DISK_WRITER.lock();
+            for b in &writer.current_buf[0..writer.current_buf_offset as usize] {
+                print!("{}{}", (b & 0xFF) as u8 as char, (b >> 8) as u8 as char);
+            }
+            if writer.is_in_word {
+                print!("{}", (writer.current_buf[writer.current_buf_offset as usize] & 0xff) as u8 as char); 
+            }
         }, 
         "echo" => echo(parts),
         "help" => help(parts),
@@ -259,7 +268,7 @@ fn cat(mut args: SplitAsciiWhitespace) {
 fn dappend(args: SplitAsciiWhitespace) {
 
     for c in args.into_iter().intersperse(&" ").flat_map(|s| s.chars())  {
-        print!("{c}");
+        //print!("{c}");
         let mut writer = DISK_WRITER.lock();
         let off = writer.current_buf_offset as usize;
         if !writer.is_in_word {
@@ -270,7 +279,7 @@ fn dappend(args: SplitAsciiWhitespace) {
         if writer.is_in_word { writer.current_buf_offset += 1; }
         writer.is_in_word = !writer.is_in_word;
     }
-    println!("\nFlushing Buffer!");
+    //println!("\nFlushing Buffer!");
     // Flush buffer 
     let mut writer = DISK_WRITER.lock();
     let lba = writer.current_lba;
@@ -289,5 +298,5 @@ fn dappend(args: SplitAsciiWhitespace) {
         x86_64::instructions::interrupts::without_interrupts(||
             DRIVER.lock().read(&mut writer.current_buf, lba, 1));
     }
-    println!("Finished flushing buffer!");
+    //println!("Finished flushing buffer!");
 }

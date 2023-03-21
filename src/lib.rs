@@ -12,7 +12,7 @@
 extern crate alloc;
 use core::{panic::PanicInfo, fmt::Write};
 
-use crate::vga_buffer::WRITER;
+use crate::{vga_buffer::WRITER, task::keyboard::DISK_WRITER};
 
 pub mod allocator;
 pub mod disk;
@@ -29,6 +29,7 @@ pub fn init() {
     gdt::init();
     interrupts::init_idt();
     unsafe { interrupts::PICS.lock().initialize() };
+    unsafe { DISK_WRITER.lock().init() }
     println!();
     print!("$> ");
     WRITER.lock().reset_cmd_start();
