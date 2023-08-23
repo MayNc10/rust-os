@@ -45,6 +45,7 @@ harness = false
 [package.metadata.bootimage]
 run-command = ["qemu-system-x86_64", "-drive", "format=raw,file={},index=0"]
 run-args = ["-curses", # for text-mode
+            # "-display", "curses", # some systems will want this format instead
            "-drive", "format=raw,file=disk.bin,index=1,media=disk"]
 test-args = [
         "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-serial", "stdio",
